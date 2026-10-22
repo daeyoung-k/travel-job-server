@@ -1,0 +1,33 @@
+name: travel-job
+services:
+  api:
+    image: ${TRAVEL_JOB_IMAGE:?Set TRAVEL_JOB_IMAGE}:${IMAGE_TAG:?Set IMAGE_TAG}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8090"
+    env_file:
+      - .env
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: "8090"
+    networks:
+      - app
+      - database
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--max-time", "3", "http://127.0.0.1:8090/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 6
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+networks:
+  app:
+    driver: bridge
+  database:
+    external: true
+    name: ${DATABASE_NETWORK:?Set DATABASE_NETWORK}

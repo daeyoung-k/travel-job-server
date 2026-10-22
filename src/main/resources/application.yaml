@@ -1,0 +1,36 @@
+server:
+  port: 8090
+
+spring:
+  config:
+    activate:
+      on-profile: local
+  application:
+    name: travel-job-server
+  jackson:
+    time-zone: Asia/Seoul
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    database: postgresql
+    defer-datasource-initialization: true
+
+  sql:
+    init:
+      mode: always
+      continue-on-error: true
+
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://${DATABASE_HOST}:${DATABASE_PORT}/${DATABASE_NAME}
+    username: ${DATABASE_USERNAME}
+    password: ${DATABASE_PASSWORD}
+
+
+
+
+
+
+

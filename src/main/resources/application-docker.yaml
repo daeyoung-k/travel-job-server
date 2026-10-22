@@ -1,0 +1,30 @@
+server:
+  port: 8090
+  shutdown: graceful
+  forward-headers-strategy: framework
+spring:
+  application:
+    name: travel-job-server
+  jackson:
+    time-zone: Asia/Seoul
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://${DATABASE_HOST}:${DATABASE_PORT:5432}/${DATABASE_NAME}
+    username: ${DATABASE_USERNAME}
+    password: ${DATABASE_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    show-sql: false
+  sql:
+    init:
+      mode: never
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never

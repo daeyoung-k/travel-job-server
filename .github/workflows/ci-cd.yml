@@ -1,0 +1,131 @@
+name: Travel Job CI/CD
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:18-3-6
+        env:
+          POSTGRES_DB: travel_job_test
+          POSTGRES_USER: travel_job_test
+          POSTGRES_PASSWORD: ci-only-password
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U travel_job_test -d travel_job_test"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      SPRING_PROFILES_ACTIVE: local
+      DATABASE_HOST: localhost
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: travel_job_test
+      DATABASE_USERNAME: travel_job_test
+      DATABASE_PASSWORD: ci-only-password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Test and build executable JAR
+        run: bash ./gradlew clean build --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: application-jar
+          path: build/libs/*-SNAPSHOT.jar
+          if-no-files-found: error
+          retention-days: 3
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: application-jar
+          path: build/libs
+      - id: image
+        name: Resolve image name
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+
+  # 실서버 배포는 준비 완료 후 아래 블록의 주석을 해제한다. 현재는 GHCR 업로드까지만 실행.
+  #   deploy:
+  #     needs: publish
+  #     runs-on: ubuntu-latest
+  #     environment: production
+  #     concurrency:
+  #       group: travel-job-production
+  #       cancel-in-progress: false
+  #     env:
+  #       SERVER_HOST: ${{ secrets.SERVER_HOST }}
+  #       SERVER_PORT: ${{ secrets.SERVER_PORT }}
+  #       SERVER_USER: ${{ secrets.SERVER_USER }}
+  #       SERVER_PATH: ${{ secrets.SERVER_PATH }}
+  #       IMAGE: ${{ needs.publish.outputs.image }}
+  #       IMAGE_TAG: ${{ github.sha }}
+  #     steps:
+  #       - uses: actions/checkout@v4
+  #       - name: Configure SSH
+  #         env:
+  #           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+  #           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+  #         run: |
+  #           set -eu
+  #           install -m 700 -d ~/.ssh
+  #           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+  #           chmod 600 ~/.ssh/id_ed25519
+  #           printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+  #           chmod 600 ~/.ssh/known_hosts
+  #           test -n "$SERVER_HOST" && test -n "$SERVER_USER"
+  #           test -n "$SSH_KNOWN_HOSTS"
+  #           [[ "$SERVER_PATH" =~ ^/[a-zA-Z0-9_./-]+$ ]]
+  #           [[ "$SERVER_PORT" =~ ^[0-9]+$ ]]
+  #       - name: Upload Compose to independent directory
+  #         run: |
+  #           set -eu
+  #           ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "mkdir -p '$SERVER_PATH'"
+  #           scp -P "$SERVER_PORT" compose.yaml "$SERVER_USER@$SERVER_HOST:$SERVER_PATH/compose.yaml.next"
+  #       - name: Deploy and verify application health
+  #         run: |
+  #           set -eu
+  #           ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" \
+  #             "bash -s -- '$SERVER_PATH' '$IMAGE' '$IMAGE_TAG'" <<'REMOTE'
+  #           set -euo pipefail
+  #           cd "$1"
+  #           test -f .env || { echo 'Create the deployment .env first'; exit 1; }
+  #           export TRAVEL_JOB_IMAGE="$2" IMAGE_TAG="$3"
+  #           docker compose -p travel-job -f compose.yaml.next config --quiet
+  #           docker compose -p travel-job -f compose.yaml.next pull api
+  #           mv compose.yaml.next compose.yaml
+  #           if ! docker compose -p travel-job -f compose.yaml up -d --no-deps --wait --wait-timeout 180 api; then
+  #             docker compose -p travel-job -f compose.yaml ps
+  #             exit 1
+  #           fi
+  #           # Keep the deployed SHA for subsequent manual compose operations.
+  #           printf '\nTRAVEL_JOB_IMAGE=%s\nIMAGE_TAG=%s\n' "$TRAVEL_JOB_IMAGE" "$IMAGE_TAG" >> .env
+  #           REMOTE
